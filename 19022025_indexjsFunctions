@@ -1,0 +1,937 @@
+/**
+ * Import function triggers from their respective submodules:
+ *
+ * const {onCall} = require("firebase-functions/v2/https");
+ * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
+ *
+ * See a full list of supported triggers at https://firebase.google.com/docs/functions
+ */
+
+// const {onRequest} = require("firebase-functions/v2/https");
+// const logger = require("firebase-functions/logger");
+
+// Create and deploy your first functions
+// https://firebase.google.com/docs/functions/get-started
+
+// exports.helloWorld = onRequest((request, response) => {
+//   logger.info("Hello logs!", {structuredData: true});
+//   response.send("Hello from Firebase!");
+// });
+
+// const functions = require("firebase-functions");
+const functions = require("firebase-functions");
+// const functions = require('firebase-functions');
+const cors = require('cors')({ origin: 'http://localhost:4200' });
+const {OpenAI} = require("openai");
+const natural = require("natural");
+
+const vision = require("@google-cloud/vision");
+const pdfLib = require("pdf-lib");
+
+const { Storage } = require("@google-cloud/storage");
+const { getStorage } = require("firebase-admin/storage");
+
+
+const os = require("os");
+const path = require("path"); // Import path module
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const fs = require('fs');
+// require('@tensorflow/tfjs-core'); /* or @tensorflow/tfjs-node */
+// require('@tensorflow/tfjs-backend-cpu');
+//const tf = require('@tensorflow/tfjs-node');
+const tf = require('@tensorflow/tfjs-core');
+
+console.log('TensorFlow.js version:', tf.version_core);
+console.log('Backend:', tf.getBackend());
+//up
+const { createCanvas,ImageData } = require('canvas');
+// const dom = new JSDOM();
+// global.document = dom.window.document;
+// global.HTMLImageElement = dom.window.HTMLImageElement;
+global.HTMLImageElement = require('canvas').Image;
+global.HTMLCanvasElement = createCanvas().constructor; // Polyfill for OpenCV.js compatibility
+global.ImageData = ImageData; // Polyfill for OpenCV.js
+const storage = new Storage();
+
+console.log("Config:", functions.config());
+console.log("OpenAI Config:", functions.config().openai);
+console.log("OpenAI Config KEY:", functions.config().openai.key);
+
+
+const openai = new OpenAI({
+  apiKey: functions.config().openai.key,
+});
+const admin = require("firebase-admin/app");
+const { response } = require("express");
+// const {Configuration, OpenAIApi} = require("openai");
+
+
+const cocoSsd = require('@tensorflow-models/coco-ssd');
+const cv = require('opencv.js');
+const { loadImage } = require('canvas');
+const Tesseract = require('tesseract.js');
+// const cv = require('opencv.js');
+admin.initializeApp();
+
+// // Initialize OpenAI API
+// const configuration = new Configuration({
+//   apiKey: "openaiApiKey",
+// });
+// const openai = new OpenAIApi(configuration);
+
+// Cloud Function to handle OpenAI requests
+// exports.getExplanation = functions.https.onCall(async (req, res) => {
+//     //res.set('Access-Control-Allow-Origin', '*');
+//     res.send({ message: 'Hello from Firebase emulator!' });
+//     try {
+//       console.log("in get explain")
+//       console.log(req)
+//       console.log(res)
+//     const {question, mode} = req.body;
+//     console.log("question admode")
+//     console.log(question)
+//     console.log(mode)
+    
+//     // Receive question and mode from the client
+
+//     if (!question) {
+//         console.log("no quetio")
+//       res.status(400).send({error: "Question is required"});
+//       return;
+//     }
+
+//     // Use OpenAI to generate a response
+//     const completion = await openai.createChatCompletion({
+//       model: "gpt-4", // Use the desired model
+//       messages: [
+//         {role: "system",
+//           content:
+//           `You are an assistant providing explanations in ${mode} mode.`},
+//         {role: "user", content: question},
+//       ],
+//     });
+
+//     const explanation = completion.data.choices[0].message.content;
+
+//     res.status(200).send({explanation});
+//   } catch (error) {
+//     console.error("Error with OpenAI API:", error);
+//     res.status(500)
+//         .send({error: "An error occurred while generating the explanation."});
+//   }
+// });
+exports.getExplanation = functions.https.onCall(async (data, context) => {
+    try {
+      // Log incoming data for debugging
+      console.log("Received data:", data);
+  
+      const { question, mode } = data; // Extract data from the incoming call
+  
+      // Validate input
+      if (!question) {
+        throw new functions.https.HttpsError('invalid-argument', 'Question is required');
+      }
+  
+      console.log("Question:", question);
+      console.log("Mode:", mode);
+  
+      // Use OpenAI to generate a response
+//       const completion = await openai.createChatCompletion({
+//         model: "gpt-4", // Use the desired model
+//         messages: [
+//           {
+//             role: "system",
+//             content: `You are an assistant providing explanations in ${mode} mode.`
+//           },
+//           { role: "user", content: question }
+//         ]
+//       });
+//       import OpenAI from "openai";
+// const openai = new OpenAI();
+
+    const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: "You are a helpful assistant." },
+            {
+                role: "user",
+                content: "What is a neural network.",
+            },
+        ],
+    });
+    // Write a haiku about recursion in programming
+    console.log(completion)
+    console.log(completion.choices[0].message);
+  
+      const explanation = completion.choices[0].message.content
+      //completion.data.choices[0].message.content;
+  
+      // Return the explanation to the client
+      return { explanation };
+  
+    } catch (error) {
+      console.error("Error with OpenAI API:", error);
+  
+      // Throw a Firebase HttpsError to send a user-friendly error message
+      throw new functions.https.HttpsError(
+        'internal',
+        'An error occurred while generating the explanation.',
+        error.message
+      );
+    }
+  });
+  exports.getStepByStepExplanation = functions.https.onCall(async (data, context) => {
+    try {
+      // Log incoming data for debugging
+      console.log("Received data:", data);
+  
+      const { question, mode } = data; // Extract data from the incoming call
+  
+      // Validate input
+      if (!question) {
+        throw new functions.https.HttpsError('invalid-argument', 'Question is required');
+      }
+  
+      console.log("Question:", question);
+      console.log("Mode:", mode);
+  
+     
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4', // Adjust to your model
+        messages: [
+          { role: 'system', content: 'You are an assistant that explains concepts step-by-step with clear headings for each step.' },
+          { role: 'user', content: `Please explain step-by-step: ${question}` }
+        ]
+      });
+    // Write a haiku about recursion in programming
+    console.log("completion")
+    console.log(completion)
+    console.log(completion.choices[0].message);
+  
+      const explanation = completion.choices[0].message.content
+      //completion.data.choices[0].message.content;
+  
+      // Return the explanation to the client
+      return { explanation };
+  
+    } catch (error) {
+      console.error("Error with OpenAI API:", error);
+  
+      // Throw a Firebase HttpsError to send a user-friendly error message
+      throw new functions.https.HttpsError(
+        'internal',
+        'An error occurred while generating the explanation.',
+        error.message
+      );
+    }
+  });
+// exports.getExplanation = functions.https.onRequest((req, res) => {
+//   cors(req, res, () => {
+//       console.log("yeah you")
+//     if (req.method !== "POST") {
+//       return res.status(405).send("Method Not Allowed");
+//     }
+
+//     const prompt = req.body.prompt;
+//     if (!prompt) {
+//       return res.status(400).send("Prompt is required");
+//     }
+
+//     // Your logic here
+//     const explanation = `Explanation for: ${prompt}`;
+//     return res.status(200).send({ explanation });
+//   });
+// });
+
+exports.getStepInfo = functions.https.onCall(async (data, context) => {
+  const { step, question } = data;
+
+  if (!step || !question) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Step or question is missing'
+    );
+  }
+
+
+  try {
+    // const response = await axios.post(
+    //   'https://api.openai.com/v1/chat/completions',
+    //   {
+    //     model: "gpt-3.5-turbo",
+    //     messages: [
+    //       { role: "system", content: "You are an AI assistant specialized in education." },
+    //       { role: "user", content: `Step: ${step}. Question: ${question}` }
+    //     ],
+    //     max_tokens: 150,
+    //   },
+    //   {
+    //     headers: {
+    //       Authorization: `Bearer ${openAiApiKey}`,
+    //     },
+    //   }
+    // );
+
+
+    //return response.data.choices[0].message.content;
+    
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4', // Adjust to your model
+      messages: [
+        { role: 'system', content: 'You are an AI assistant specialized in education and you want to further explain some step' },
+        { role: 'user', content: `break down this step more in-depth. Step: ${step}. Question: ${question}` }
+      ]
+    });
+  // Write a haiku about recursion in programming
+  console.log("completion")
+  console.log(completion)
+  console.log(completion.choices[0].message);
+  const explanation = completion.choices[0].message.content
+  return { explanation };
+
+  } catch (error) {
+    console.error("Error communicating with OpenAI:", error.message);
+    throw new functions.https.HttpsError(
+      'internal',
+      'Unable to fetch information from ChatGPT'
+    );
+  }
+});
+// Cosine similarity helper function
+function cosineSimilarity(vecA, vecB) {
+  const dotProduct = vecA.reduce((sum, a, idx) => sum + a * vecB[idx], 0);
+  const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+  const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
+  return magnitudeA && magnitudeB ? dotProduct / (magnitudeA * magnitudeB) : 0;
+}
+
+// Tokenize and vectorize
+function vectorizeText(text) {
+  const tokenizer = new natural.WordTokenizer();
+  const tokens = tokenizer.tokenize(text.toLowerCase());
+  const frequency = {};
+  tokens.forEach((token) => {
+    frequency[token] = (frequency[token] || 0) + 1;
+  });
+  return frequency;
+}
+
+// Match subject/topic suggestion
+exports.suggestSubjectAndTopic = functions.https.onCall(async (data, context) => {
+  const { query, userId } = data;
+
+  if (!query) {
+    throw new functions.https.HttpsError("invalid-argument", "Query is required.");
+  }
+
+  // Tokenize and vectorize query
+  const queryVector = vectorizeText(query);
+
+  // Fetch global topics
+  const topicsSnapshot = await db.collection("topics").get();
+  let suggestions = [];
+
+  topicsSnapshot.forEach((doc) => {
+    const topic = doc.data();
+    const topicVector = vectorizeText(topic.name);
+    const similarity = cosineSimilarity(Object.values(queryVector), Object.values(topicVector));
+
+    suggestions.push({
+      topic: topic.name,
+      subject: topic.subject,
+      similarity,
+    });
+  });
+
+  // Sort by similarity
+  suggestions.sort((a, b) => b.similarity - a.similarity);
+
+  // Suggest best match or default to "General Knowledge"
+  const bestMatch = suggestions[0] || { subject: "General Knowledge", topic: "Miscellaneous" };
+
+  return bestMatch;
+});
+
+exports.getSubjectAndTopic = functions.https.onCall(async (data, context) => {
+  try {
+    console.log("Received data:", data);
+
+    const { question, userId } = data; // Extract input
+    if (!question || !userId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Both question and userId are required."
+      );
+    }
+
+    // Fetch user's subjects and topics from Firestore
+    const userSubjects = await db
+      .collection("users")
+      .doc(userId)
+      .collection("subjects")
+      .get();
+
+    const subjects = [];
+    userSubjects.forEach((doc) => {
+      const data = doc.data();
+      if (data.topics) {
+        data.topics.forEach((topic) => {
+          subjects.push({ subject: doc.id, topic });
+        });
+      }
+    });
+
+    // Check similarity of the query with user subjects/topics
+    const queryVector = vectorizeText(question); // A function to encode text into vectors
+    let bestMatch = null;
+    let highestSimilarity = 0.7; // Minimum threshold
+
+    for (const subject of subjects) {
+      const topicVector = vectorizeText(subject.topic);
+      const similarityScore = cosineSimilarity(queryVector, topicVector);
+      if (similarityScore > highestSimilarity) {
+        highestSimilarity = similarityScore;
+        bestMatch = subject;
+      }
+    }
+
+    // If a suitable match is found, use it
+    let detectedSubject = null;
+    let detectedTopic = null;
+    if (bestMatch) {
+      detectedSubject = bestMatch.subject;
+      detectedTopic = bestMatch.topic;
+    } else {
+      // If no match, call OpenAI to detect subject and topic
+      const completion = await openai.createCompletion({
+        model: "text-davinci-003",
+        prompt: `
+          Based on the following query, suggest the subject and topic:
+          Query: "${question}"
+          Format the response as JSON:
+          { "subject": "Suggested Subject", "topic": "Suggested Topic" }
+        `,
+        max_tokens: 100,
+      });
+
+      const result = JSON.parse(completion.data.choices[0].text.trim());
+      detectedSubject = result.subject;
+      detectedTopic = result.topic;
+
+      // Optionally add new subject/topic to user's data
+      await db
+        .collection("users")
+        .doc(userId)
+        .collection("subjects")
+        .doc(detectedSubject)
+        .set(
+          { topics: admin.firestore.FieldValue.arrayUnion(detectedTopic) },
+          { merge: true }
+        );
+    }
+
+    console.log("Detected Subject:", detectedSubject);
+    console.log("Detected Topic:", detectedTopic);
+
+    return { detectedSubject, detectedTopic };
+  } catch (error) {
+    console.error("Error:", error);
+    throw new functions.https.HttpsError(
+      "internal",
+      "An error occurred while processing your request.",
+      error.message
+    );
+  }
+});
+
+exports.getSuggestedSubjectAndTopic = functions.https.onCall(async (data, context) => {
+  try {
+    // Log incoming data for debugging
+    console.log("Received data:", data);
+
+    const { query } = data; // Extract user query
+    if (!query) {
+      throw new functions.https.HttpsError('invalid-argument', 'Query is required');
+    }
+
+    console.log("User Query:", query);
+
+    // Define the prompt for text-davinci-003
+    const prompt = `
+    Based on the following query, suggest the most relevant subject and topic:
+
+    Query: "${query}"
+
+    Format the response as:
+    {
+      "subject": "Suggested Subject",
+      "topic": "Suggested Topic"
+    }
+    `;
+
+    // Call OpenAI API
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [      
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: `
+        Based on the following query, suggest the most relevant subject and topic:
+    
+        Query: "${query}"
+    
+        Format the response as:
+        {
+          "subject": "Suggested Subject",
+          "topic": "Suggested Topic"
+        }
+        `},
+    ], // Adjust creativity level
+    });
+
+  //   messages: [      
+  //     { role: "system", content: "You are a helpful assistant." },
+  //     {
+  //         role: "user",
+  //         content: prompt,
+  //     },
+  // ]
+
+    // Parse OpenAI's response
+    // const responseText = completion.data.choices[0].text.trim();
+    const responseText = completion.choices[0].message.content
+    console.log("OpenAI Response:", responseText);
+
+    // Ensure the response is a valid JSON object
+    const { subject, topic } = JSON.parse(responseText);
+
+    // Return the suggested subject and topic
+    return { subject, topic };
+  } catch (error) {
+    console.error("Error in OpenAI API call:", error);
+
+    // Handle errors gracefully
+    throw new functions.https.HttpsError(
+      'internal',
+      'An error occurred while generating the subject and topic.',
+      error.message
+    );
+  }
+});
+
+//16 01 2025
+
+exports.uploadSlide = functions.https.onCall(async (data, context) => {
+  try {
+    const { fileBase64, fileName } = data;
+    const buffer = Buffer.from(fileBase64, "base64");
+    fs.writeFileSync("tmp/test.pdf", buffer);
+    const bucket = getStorage().bucket();
+
+    //const buffer = Buffer.from(fileBase64, "base64");
+    
+    //const tempFilePath = `/tmp/${fileName}`;
+
+    // Step 1: Download PDF from Firebase Storage
+    // Ensure you are correctly downloading the file using the full file path
+    //const filePath = `uploads/${fileName}`;  // Add 'uploads/' if it's not part of the filename already
+    //await bucket.file(filePath).download({ destination: tempFilePath });
+
+    //const tempFilePath = `/tmp/${fileName}`;
+
+    // Step 1: Download PDF from Firebase Storage
+    //await bucket.file(`uploads/${fileName}`).download({ destination: tempFilePath });
+    
+    // const file = bucket.file(`uploads/${fileName}`);
+
+    // // Step 1: Save the file to Firebase Storage
+    // await file.save(fileBase64, {
+    //   contentType: 'application/pdf', // Or the appropriate content type for your file
+    // });
+
+    const file = bucket.file(`uploads/${fileName}`);
+    await file.save(buffer)    // Upload the file with metadata
+    // await file.save(buffer, {
+    //   metadata: {
+    //     contentType: "application/pdf", // Set the correct content type for PDF
+    //   },
+    // });
+
+    // Step 2: Proceed with the rest of the logic, e.g., extracting text from the PDF
+    // const tempFilePath = `/tmp/${fileName}`;
+    const tempFilePath = `tmp/${fileName}`;
+    await file.download({ destination: tempFilePath });
+   // await bucket.file(`uploads/${fileName}`).download({ destination: tempFilePath });
+
+    
+
+    // Step 2: Extract PDF content
+    const pdf = await pdfjsLib.getDocument({ url: tempFilePath }).promise; // Load PDF document
+    const slides = [];
+
+    // Loop through each page of the PDF
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const text = textContent.items.map((item) => item.str).join(" ");
+      // slides.push({ page: i, text, images: [] });
+
+      console.log("doing slide" + i)
+      // const imagePaths = await extractImagesFromPDF(tempFilePath);
+      const imagePath = await extractImagesFromSlide(page,i);
+      const preprocessedImagePath = await preprocessImage(imagePath);
+
+  // Step 1: Detect Objects
+  const objects = await detectObjects(preprocessedImagePath);
+
+  // Step 2: Extract Text with Context
+  const textWithContext = await extractTextWithContext(preprocessedImagePath, objects);
+
+  // Step 3: Detect Formula Regions
+  const formulaRegions = "detectFormulaRegions(preprocessedImagePath)";
+
+  // Step 4: Extract Text from Formula Regions
+  const formulas = "await extractFormulasFromRegions(preprocessedImagePath, formulaRegions)";
+
+  console.log('Objects:', objects);
+  console.log('Text with Context:', textWithContext);
+  console.log('Formulas:', formulas);
+
+  // return { objects, textWithContext, formulas };
+  slides.push({ page: i, text, images: objects, formulas: formulas });
+
+      // Ensure all objects are resolved before extracting images
+      // const ops = await page.getOperatorList();
+      // for (let i = 0; i < ops.fnArray.length; i++) {
+      //   if (
+      //     ops.fnArray[i] === pdfjsLib.OPS.paintJpegXObject ||
+      //     ops.fnArray[i] === pdfjsLib.OPS.paintImageXObject
+      //   ) {
+      //     const obj = ops.argsArray[i][0];
+      
+      //     // Check if the object is resolved
+      //     const image = await page.commonObjs.get(obj).catch((error) => {
+      //       console.warn(`Skipping unresolved object ${obj}:`, error.message);
+      //       return null; // Skip unresolved objects
+      //     });
+      
+      //     if (image) {
+      //       // Process the image (e.g., send to Vision API)
+      //       const [visionResult] = await visionClient.textDetection(image.data);
+      //       slides.push({
+      //         rawData: image.data,
+      //         visionText: visionResult.textAnnotations[0]?.description || "",
+      //       });
+      //     }
+      //   }
+      // }
+      
+    }
+
+    console.log("about to move to save")
+    // Step 4: Save to Firestore
+    const docRef = await admin.firestore().collection("documents").add({ fileName, slides });
+    return { success: true, documentId: docRef.id,slides:slides };
+  } catch (error) {
+    console.error("Error processing PDF:", error);
+    throw new functions.https.HttpsError("internal", "Explanation request failed.");
+  }
+});
+
+exports.requestSlideExplanation = functions.https.onCall(async (data, context) => {
+  try {
+    const { text, image } = data;
+    let extractedText = text;
+
+    if (image) {
+      const visionClient = new vision.ImageAnnotatorClient();
+      const [result] = await visionClient.textDetection(image);
+      extractedText = result.textAnnotations?.[0]?.description || "";
+    }
+
+    // Call your AI model to generate an explanation (e.g., OpenAI)
+    // const aiExplanation = await generateAIExplanation(extractedText);
+    // Call OpenAI API
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [      
+        { role: "system", content: "You are a helpful assistant that explains in a didactiq manner." },
+        { role: "user", content: `
+        Give in-depth explanation and examples for: ${text}`},
+    ], // Adjust creativity level
+    });
+    console.log("completion in slides")
+    console.log(completion)
+    console.log(completion.choices[0].message);
+    const explanation = completion.choices[0].message.content
+    return { explanation };
+    // return { explanation: aiExplanation };
+  } catch (error) {
+    console.error(error);
+    throw new functions.https.HttpsError("internal", "Explanation request failed.");
+  }
+});
+
+async function generateAIExplanation(text) {
+  // Call your AI model (like OpenAI) to generate explanation
+  // Call OpenAI API
+  //one
+  
+  return `Generated explanation for: ${text}`;
+}
+
+exports.extractSlides = functions.https.onCall(async (data, context) => {
+  const { fileName } = data;
+  console.log("fileName");
+  console.log(fileName);
+  console.log("fileName data DATA");
+  // Define paths for storage and PDF file
+  const bucket = getStorage().bucket();
+  const tempLocalPath = path.join('/tmp', fileName);
+
+  // Download PDF from Firebase Storage to local temp directory
+  await bucket.file(fileName).download({ destination: tempLocalPath });
+
+  // Load PDF using pdf-lib
+  const pdfBytes = await fs.readFile(tempLocalPath);
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+
+  const slides = [];
+  for (let i = 0; i < pdfDoc.getPageCount(); i++) {
+    const page = pdfDoc.getPage(i);
+
+    // Extract page text
+    const textContent = page.getTextContent ? await page.getTextContent() : '';
+
+    // Extract image bytes from the page
+    const images = [];
+    const rawImages = page.node.normalAppearance;
+
+    // Convert each image to a Firebase Storage path and push to Firestore
+    for (const image of rawImages) {
+      const imageName = `uploads/slides/slide_${i + 1}_${Date.now()}.png`;
+      const imagePath = path.join('/tmp', imageName);
+      await fs.writeFile(imagePath, image.getBytes()); // Save image locally
+
+      // Upload to Firebase Storage
+      const destinationPath = `images/${imageName}`;
+      await bucket.upload(imagePath, { destination: destinationPath });
+      images.push(`gs://${bucket.name}/${destinationPath}`);
+    }
+
+    // Store slide info
+    slides.push({ pageNumber: i + 1, text: textContent, images });
+  }
+
+  // Save slide data to Firestore
+  const slidesDoc = admin.firestore().collection('documents').doc();
+  await slidesDoc.set({ slides, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+
+  return { documentId: slidesDoc.id, message: 'Slides extracted successfully.' };
+});
+
+//18 01 2025
+const preprocessImage = (imagePath) => {
+  // const cv = require('opencv.js'); // OpenCV.js for preprocessing
+  // const fs = require('fs');
+  //const { createCanvas, loadImage } = require('canvas');
+
+  return new Promise(async (resolve, reject) => {
+    try {
+      console.log('Image path:', imagePath);
+
+      const img = await loadImage(imagePath);
+
+      console.log('loaded Image:', img);
+
+      const canvas = createCanvas(img.width, img.height);
+      console.log('canvas created:', canvas);
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // Convert to grayscale
+      // try {
+        const mat = cv.imread(canvas);
+      //   console.log('Mat created successfully');
+      // } catch (error) {
+      //   console.error('cv.imread failed:', error.message);
+      // }
+      console.log('mat read:', mat);
+
+      const gray = new cv.Mat();
+      cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+
+      // Apply threshold
+      const binary = new cv.Mat();
+      cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
+
+      // Write the preprocessed image to disk (optional)
+      const preprocessedCanvas = createCanvas(mat.cols, mat.rows);
+      cv.imshow(preprocessedCanvas, binary);
+
+      const buffer = preprocessedCanvas.toBuffer('image/png');
+      fs.writeFileSync('./preprocessed-image.png', buffer);
+
+      resolve('./preprocessed-image.png');
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+const detectObjects = async (imagePath) => {
+  // const cocoSsd = require('@tensorflow-models/coco-ssd');
+  //const tf = require('@tensorflow/tfjs-node');
+  //const { createCanvas, loadImage } = require('canvas');
+
+  const img = await loadImage(imagePath);
+  const canvas = createCanvas(img.width, img.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const model = await cocoSsd.load();
+  const predictions = await model.detect(canvas);
+
+  predictions.forEach((prediction, index) => {
+    console.log(
+      `Object #${index + 1}: ${prediction.class} with ${Math.round(prediction.score * 100)}% confidence.`
+    );
+  });
+
+  return predictions;
+};
+
+const extractTextWithContext = async (imagePath, objects) => {
+  //const Tesseract = require('tesseract.js');
+  const extractedTexts = [];
+
+  for (const obj of objects) {
+    const { bbox, class: objectClass } = obj;
+    const [x, y, width, height] = bbox;
+
+    // Perform OCR for the region
+    const result = await Tesseract.recognize(imagePath, 'eng', {
+      rectangle: { left: x, top: y, width, height },
+    });
+
+    extractedTexts.push({
+      object: objectClass,
+      text: result.data.text.trim(),
+    });
+  }
+
+  return extractedTexts;
+};
+
+const detectFormulaRegions = (imagePath) => {
+  //const cv = require('opencv.js');
+  // const fs = require('fs');
+  const imgData = fs.readFileSync(imagePath);
+  const img = cv.matFromImageData(imgData);
+
+  const gray = new cv.Mat();
+  cv.cvtColor(img, gray, cv.COLOR_RGBA2GRAY);
+
+  const thresh = new cv.Mat();
+  cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 15, 10);
+
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+  const formulaRegions = [];
+  for (let i = 0; i < contours.size(); i++) {
+    const rect = cv.boundingRect(contours.get(i));
+    formulaRegions.push(rect);
+  }
+
+  return formulaRegions;
+};
+
+const processSlide = async (imagePath) => {
+  const preprocessedImagePath = await preprocessImage(imagePath);
+
+  // Step 1: Detect Objects
+  const objects = await detectObjects(preprocessedImagePath);
+
+  // Step 2: Extract Text with Context
+  const textWithContext = await extractTextWithContext(preprocessedImagePath, objects);
+
+  // Step 3: Detect Formula Regions
+  const formulaRegions = detectFormulaRegions(preprocessedImagePath);
+
+  // Step 4: Extract Text from Formula Regions
+  const formulas = await extractFormulasFromRegions(preprocessedImagePath, formulaRegions);
+
+  console.log('Objects:', objects);
+  console.log('Text with Context:', textWithContext);
+  console.log('Formulas:', formulas);
+
+  return { objects, textWithContext, formulas };
+};
+
+const extractImagesFromSlide = async (page,i) => {
+  
+
+    const viewport = page.getViewport({ scale: 2.0 }); // Adjust scale for image quality
+
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const ctx = canvas.getContext('2d');
+
+    const renderContext = {
+      canvasContext: ctx,
+      viewport: viewport,
+    };
+
+    await page.render(renderContext).promise;
+
+    // Save the page as an image (e.g., PNG)
+    const imagePath = `tmp/page-${i}.png`;
+    const out = fs.createWriteStream(imagePath);
+    const stream = canvas.createPNGStream();
+
+    stream.pipe(out);
+    await new Promise((resolve, reject) => {
+      out.on('finish', resolve);
+      out.on('error', reject);
+    });
+
+
+  return imagePath;
+};
+
+const extractImagesFromPDF = async (tempFilePath) => {
+  const pdf = await pdfjsLib.getDocument({ url: tempFilePath }).promise;
+  const imagePaths = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 }); // Adjust scale for image quality
+
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const ctx = canvas.getContext('2d');
+
+    const renderContext = {
+      canvasContext: ctx,
+      viewport: viewport,
+    };
+
+    await page.render(renderContext).promise;
+
+    // Save the page as an image (e.g., PNG)
+    const imagePath = `tmp/page-${i}.png`;
+    const out = fs.createWriteStream(imagePath);
+    const stream = canvas.createPNGStream();
+
+    stream.pipe(out);
+    await new Promise((resolve, reject) => {
+      out.on('finish', resolve);
+      out.on('error', reject);
+    });
+
+    imagePaths.push(imagePath);
+  }
+
+  return imagePaths;
+};
