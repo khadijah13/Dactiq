@@ -1,0 +1,36 @@
+<div class="build-learn-container">
+    <!-- Left Panel: Query Input & Code Display -->
+    <div class="left-panel">
+      <div class="query-section">
+        <input
+          type="text"
+          [(ngModel)]="query"
+          placeholder="Enter your query (e.g., build a chatbot)"
+        />
+        <button (click)="onQuerySubmit()">Generate Code</button>
+      </div>
+
+      
+      <div class="code-display">
+        <pre
+          *ngFor="let segment of segments"
+          (click)="onSegmentClick(segment)"
+          [class.selected]="selectedSegment?.id === segment.id"
+        >
+  <span class="segment-number">[{{ segment.id }}]</span> {{ segment.content }}
+        </pre>
+      </div>
+    </div>
+  
+    <!-- Right Panel: Explanation Display -->
+    <div class="right-panel">
+      <div class="explanation-panel" *ngIf="selectedSegment; else defaultMessage">
+        <h3>Explanation for Segment [{{ selectedSegment.id }}]</h3>
+        <p>{{ selectedSegment.explanation }}</p>
+      </div>
+      <ng-template #defaultMessage>
+        <p>Click on a code segment to see its explanation.</p>
+      </ng-template>
+    </div>
+  </div>
+  
